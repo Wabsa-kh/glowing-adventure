@@ -1,12 +1,32 @@
 {
   "long_channels": [
-    "https://www.youtube.com/@saplingzone",
-    "https://www.youtube.com/@psjexplainshindi",
-    "https://www.youtube.com/@KDrama-Nest"
+    {
+      "url": "https://www.youtube.com/@saplingzone",
+      "sort_mode": "oldest_to_newest",
+      "rescan": false
+    },
+    {
+      "url": "https://www.youtube.com/@psjexplainshindi",
+      "sort_mode": "oldest_to_newest",
+      "rescan": false
+    },
+    {
+      "url": "https://www.youtube.com/@KDrama-Nest",
+      "sort_mode": "oldest_to_newest",
+      "rescan": false
+    }
   ],
   "short_channels": [
-    "https://www.youtube.com/@KDrama-Nest",
-    "https://www.youtube.com/@Amz_Drama"
+    {
+      "url": "https://www.youtube.com/@KDrama-Nest",
+      "sort_mode": "oldest_to_newest",
+      "rescan": false
+    },
+    {
+      "url": "https://www.youtube.com/@Amz_Drama",
+      "sort_mode": "oldest_to_newest",
+      "rescan": false
+    }
   ],
   "upload_settings": {
     "category_id": "24",

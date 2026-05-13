@@ -69,21 +69,41 @@ def get_auth_service(account):
 # ==========================================
 # 1. SCANNER (Uses Unique Keys)
 # ==========================================
-def update_channel_queues(channel_urls, uploaded_ids, all_queues, is_shorts=False):
+def update_channel_queues(channel_list, uploaded_ids, all_queues, is_shorts=False):
     mode_suffix = "#short" if is_shorts else "#long"
     
-    for channel_url in channel_urls:
+    for channel_obj in channel_list:
+        if isinstance(channel_obj, str):
+            channel_obj = {"url": channel_obj, "sort_mode": "oldest_to_newest", "rescan": False}
+            
+        channel_url = channel_obj['url']
+        sort_mode = channel_obj.get('sort_mode', 'oldest_to_newest')
+        rescan = channel_obj.get('rescan', False)
+        
         queue_key = f"{channel_url}{mode_suffix}"
-        print(f"🔍 SCANNING: {queue_key}")
+        print(f"🔍 SCANNING: {queue_key} (Mode: {sort_mode})")
         
         base_url = channel_url.rstrip("/")
         scan_url = f"{base_url}/shorts" if is_shorts else f"{base_url}/videos"
 
+        if rescan:
+            print(f"   🧹 Rescan requested. Clearing existing queue.")
+            if queue_key in all_queues:
+                all_queues[queue_key] = []
+            channel_obj['rescan'] = False
+
+        is_initial_scan = queue_key not in all_queues or len(all_queues[queue_key]) == 0
         if queue_key not in all_queues:
             all_queues[queue_key] = []
 
+        # If it's an initial scan and we want most_popular, do a deep scan
+        extract_flat = True
+        if is_initial_scan and sort_mode == 'most_popular':
+            print("   ⚠️ Deep scan required for most_popular sorting. This may take a few minutes...")
+            extract_flat = False # Forces deep fetch of all videos
+
         ydl_opts = {
-            'extract_flat': True,
+            'extract_flat': extract_flat,
             'quiet': True,
             'extractor_args': {'youtube': {'player_client': ['ios', 'android', 'tv']}}
         }
@@ -94,18 +114,34 @@ def update_channel_queues(channel_urls, uploaded_ids, all_queues, is_shorts=Fals
                 
                 info = ydl.extract_info(scan_url, download=False)
                 if 'entries' in info:
-                    new_count = 0
-                    entries = list(info['entries'])
-                    entries.reverse() # Oldest to Newest
-                    
-                    for e in entries:
+                    valid_entries = []
+                    for e in info['entries']:
+                        if e is None: continue
                         video_id = e.get('id')
-                        video_url = f"https://www.youtube.com/watch?v={video_id}"
+                        if not video_id: continue
                         
-                        # Master check: Not uploaded AND not already in THIS specific queue
-                        if video_id and video_id not in uploaded_ids and video_url not in all_queues[queue_key]:
-                            all_queues[queue_key].append(video_url)
-                            new_count += 1
+                        video_url = f"https://www.youtube.com/watch?v={video_id}"
+                        if video_id not in uploaded_ids and video_url not in all_queues[queue_key]:
+                            valid_entries.append(e)
+                    
+                    new_count = len(valid_entries)
+                    if new_count == 0:
+                        print("   -> Found 0 new videos.")
+                        continue
+                        
+                    if is_initial_scan:
+                        if sort_mode == 'oldest_to_newest':
+                            valid_entries.reverse() # newest first -> oldest first
+                        elif sort_mode == 'most_popular':
+                            valid_entries.sort(key=lambda x: x.get('view_count', 0), reverse=True)
+                        
+                        new_urls = [f"https://www.youtube.com/watch?v={e['id']}" for e in valid_entries]
+                        all_queues[queue_key] = new_urls
+                    else:
+                        # Subsequent scan: Prepend new videos to top of the queue
+                        new_urls = [f"https://www.youtube.com/watch?v={e['id']}" for e in valid_entries]
+                        all_queues[queue_key] = new_urls + all_queues[queue_key]
+                        
                     print(f"   -> Found {new_count} new videos.")
         except Exception as e:
             print(f"   ❌ Scan failed: {e}")
@@ -205,7 +241,8 @@ def process_track(mode, channel_list, database, tokens, settings):
 
     for i in range(total):
         curr_idx = (idx + 1 + i) % total
-        channel_url = channel_list[curr_idx]
+        channel_obj = channel_list[curr_idx]
+        channel_url = channel_obj if isinstance(channel_obj, str) else channel_obj['url']
         queue_key = f"{channel_url}{mode_suffix}"
         
         queue = database['queues'].get(queue_key, [])
@@ -221,6 +258,12 @@ def process_track(mode, channel_list, database, tokens, settings):
                     database['uploaded_videos'].append(video_data['video_id'])
                     database['state'][idx_key] = curr_idx
                     return True
+                else:
+                    print("   ❌ Upload failed. Aborting action run.")
+                    sys.exit(1)
+            else:
+                print("   ❌ Download failed. Aborting action run.")
+                sys.exit(1)
     return False
 
 # ==========================================
@@ -232,6 +275,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     config = load_json(CONFIG_FILE)
+    original_config_str = json.dumps(config)
     database = load_json(DATABASE_FILE, {"uploaded_videos": [], "queues": {}, "state": {}})
     
     tokens = {"accounts": []}
@@ -245,6 +289,10 @@ if __name__ == "__main__":
     # 1. Update active mode queue
     database['queues'] = update_channel_queues(channel_list, database['uploaded_videos'], database['queues'], is_shorts=is_shorts)
     save_json(DATABASE_FILE, database)
+    
+    # Check if config was modified (e.g. rescan toggled to False)
+    if json.dumps(config) != original_config_str:
+        save_json(CONFIG_FILE, config)
 
     # 2. Process active mode video
     success = process_track(mode, channel_list, database, tokens, config['upload_settings'])
