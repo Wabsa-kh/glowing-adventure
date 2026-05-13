@@ -105,6 +105,7 @@ def update_channel_queues(channel_list, uploaded_ids, all_queues, is_shorts=Fals
         ydl_opts = {
             'extract_flat': extract_flat,
             'quiet': True,
+            'no_warnings': True,
             'extractor_args': {'youtube': {'player_client': ['ios', 'android', 'tv']}}
         }
         
